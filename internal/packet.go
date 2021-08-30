@@ -4,20 +4,21 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"net"
 )
 
 type (
 	Packet struct {
-		buffer []byte
-		cursor uint32
-		conn   *net.Conn
+		buffer      []byte
+		cursor      uint16
+		client      *Client
+		fragmented  bool
+		payloadSize uint16
 	}
 )
 
-func NewPacket() *Packet {
+func NewPacket(data []byte) *Packet {
 	return &Packet{
-		buffer: make([]byte, 0),
+		buffer: data,
 		cursor: 0,
 	}
 }
@@ -30,24 +31,23 @@ func (packet *Packet) GetBytes() []byte {
 	return append(pSize, packet.buffer...)
 }
 
-/*
-Set bytes for current packet. This is used when packets are fragmented.
-*/
+func (packet *Packet) GetRemainderBytes() []byte {
+	return packet.buffer[packet.cursor:]
+}
+
 func (packet *Packet) SetBytes(data []byte) {
 	packet.buffer = data
+	packet.cursor = 0
 }
 
 /*
 Get the buffer size of the packet
 */
-func (packet *Packet) Length() uint32 {
-	return uint32(len(packet.buffer))
+func (packet *Packet) Length() uint16 {
+	return uint16(len(packet.buffer))
 }
 
-/**
-Get the number of unread bytes in the packet buffer
-*/
-func (packet *Packet) UnreadLength() uint32 {
+func (packet *Packet) UnreadLength() uint16 {
 	if packet.cursor >= packet.Length() {
 		return 0
 	}
@@ -98,7 +98,7 @@ func (packet *Packet) ReadUint8() uint8 {
 /**
 Read a certain amount of bytes from the buffer.
 */
-func (packet *Packet) ReadBytes(lenToRead uint32) []byte {
+func (packet *Packet) ReadBytes(lenToRead uint16) []byte {
 
 	// Check to see if we are not reading past the buffer lenToRead
 
@@ -215,6 +215,10 @@ func (packet *Packet) Reset(force bool) {
 	} else {
 		packet.cursor -= 2
 	}
+}
+
+func (packet *Packet) Seek(pos uint16) {
+	packet.cursor += pos
 }
 
 func (packet *Packet) ResetCursor() *Packet {
