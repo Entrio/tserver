@@ -5,7 +5,9 @@ import (
 	"net"
 )
 
-type Client struct {
-	ID uuid.UUID
-	Connection net.Conn
-}
+type (
+	Client struct {
+		ID         uuid.UUID
+		Connection net.Conn
+	}
+)

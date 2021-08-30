@@ -20,21 +20,22 @@ func main() {
 		return
 	}
 
-	con, err := net.Dial("tcp", args[2])
+	con, err := net.Dial("tcp", args[1])
 	if err != nil {
 		log.Err(err).Msg("Failed to connect to remote host")
+		return
 	}
 	defer con.Close()
 
 	cReader := bufio.NewReader(os.Stdin)
 	sReader := bufio.NewReader(con)
 
-	for {
+	go func() {
 		cMessage, err := cReader.ReadString('\n')
 
 		switch err {
 		case nil:
-			if _, err = con.Write([]byte(strings.TrimSpace(cMessage) + "\n")); err != nil {
+			if _, err = con.Write([]byte(strings.TrimSpace(cMessage))); err != nil {
 				log.Warn().Err(err).Msg("Failed to send message to the server")
 			}
 		case io.EOF:
@@ -44,7 +45,9 @@ func main() {
 			log.Warn().Msg("Unknown error has occurred")
 			return
 		}
+	}()
 
+	for {
 		serverResponse, err := sReader.ReadString('\n')
 		switch err {
 		case nil:
