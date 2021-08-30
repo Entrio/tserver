@@ -46,7 +46,7 @@ func main() {
 				log.Warn().Msg("Server closed the remote connection")
 				return
 			default:
-				log.Warn().Msg("Unknown server error")
+				log.Warn().Msg("Lost connection to server")
 				return
 			}
 		}
@@ -78,5 +78,4 @@ func main() {
 
 	<-exitChan
 	log.Info().Msg("Application terminated")
-
 }

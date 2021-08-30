@@ -1,10 +1,12 @@
 package internal
 
 import (
+	"bufio"
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"net"
+	"os"
 	"strings"
 	"sync"
 )
@@ -20,6 +22,8 @@ type (
 		clients  map[uuid.UUID]*Client
 		addr     *net.TCPAddr
 		listener *net.TCPListener
+		input    *bufio.Reader
+		exitChan chan struct{}
 	}
 )
 
@@ -34,8 +38,10 @@ func NewServer(ipep string) *Server {
 	}
 
 	instance = &Server{
-		clients: make(map[uuid.UUID]*Client),
-		name:    "FIRE PHOENIX testing server",
+		clients:  make(map[uuid.UUID]*Client),
+		name:     "FIRE PHOENIX testing server",
+		input:    bufio.NewReader(os.Stdin),
+		exitChan: make(chan struct{}),
 	}
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp4", ipep)
@@ -46,6 +52,7 @@ func NewServer(ipep string) *Server {
 	}
 
 	instance.addr = tcpAddr
+	go instance.listenForInput()
 
 	log.Info().Msg("New server instance created")
 	return instance
@@ -62,8 +69,86 @@ func (s *Server) Start() (err error) {
 
 	defer s.listener.Close()
 	log.Info().Str("IPEP", s.addr.String()).Msg("Server started")
-	s.listenForConnections()
+	go s.listenForConnections()
+	<-s.exitChan
+	log.Info().Msg("Server terminated")
 	return nil
+}
+
+func (s *Server) listenForInput() {
+	for {
+		select {
+		case <-s.exitChan:
+			return
+		default:
+			data, err := s.input.ReadBytes('\n')
+			if err != nil {
+				log.Err(err).Msg("Failed to parse input")
+			}
+			data = data[:len(data)-1] // remove the \n
+
+			var payload string
+			if string(data[:1]) == "/" {
+				// we are issuing a command
+				payload = string(data[1:])
+
+				// is there a space (we need to get the args after the command)
+				spacePos := strings.Index(payload, " ")
+				var cmd string
+				if spacePos != -1 {
+					// there are spaces, meaning there are args
+					cmd = string(data[1 : spacePos+1])
+					args := strings.Split(string(data[spacePos+2:]), " ") // compensate the space and the /
+					s.processCommands(cmd, args...)
+				} else {
+					cmd = string(data[1:])
+					s.processCommands(cmd)
+				}
+
+			} else {
+				payload = string(data)
+
+				// just a msg to everyone
+				if err := s.BroadcastAll([]byte(fmt.Sprintf("[SERVER BROADCAST] %s\n", payload))); err != nil {
+					log.Err(err).Msg("Failed to broadcast to all")
+				}
+			}
+		}
+
+	}
+}
+
+func (s *Server) processCommands(cmd string, args ...string) {
+	log.Info().Str("cmd", cmd).Msg("Processing command")
+	cmd = strings.ToLower(cmd)
+
+	switch cmd {
+	case "quit": // Exit
+		s.exitChan <- struct{}{}
+		break
+	case "w": // Send a message to a specific user
+		if len(args) <= 1 {
+			log.Warn().Msg("Please specify a message")
+			break
+		}
+
+		destID, err := uuid.Parse(args[0])
+		if err != nil {
+			log.Err(err).Msg("failed to parse client ID")
+			break
+		}
+
+		msg := fmt.Sprintf("%s\n", strings.Join(args[1:], " "))
+		if err := s.BroadcastClient(destID, []byte(msg)); err != nil {
+			log.Err(err).Msg("failed to broadcast message to client")
+		}
+
+		break
+	}
+
+	if len(args) > 0 {
+		fmt.Println(args)
+	}
 }
 
 // addCClient adds a new client to the map and returns the instance of the new client
@@ -92,6 +177,16 @@ func (s *Server) removeClientByID(uid string) error {
 
 // BroadcastAll send message to all connected clients
 func (s *Server) BroadcastAll(msg []byte) error {
+	s.rwm.RLock()
+	defer s.rwm.RUnlock()
+
+	for _, c := range s.clients {
+		_, err := c.Connection.Write(msg)
+		if err != nil {
+			log.Warn().Err(err).Str("id", c.ID.String()).Msg("Failed to write to client socket")
+		}
+	}
+
 	return nil
 }
 
@@ -119,7 +214,7 @@ func (s *Server) listenForConnections() {
 		if err != nil {
 			log.Warn().Msg("Failed to accept tcp connection")
 			log.Err(err).Msg("Error:")
-			continue
+			break
 		}
 		s.addCClient(conn)
 	}
