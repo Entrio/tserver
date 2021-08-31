@@ -82,6 +82,9 @@ func (s *Server) listenForInput() {
 			return
 		default:
 			data, err := s.input.ReadBytes('\n')
+			if len(data) <= 1 {
+				continue
+			}
 			if err != nil {
 				log.Err(err).Msg("Failed to parse input")
 			}
